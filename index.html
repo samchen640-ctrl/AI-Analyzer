@@ -1040,6 +1040,7 @@
             }
         }
 
+        // ==================== 對話區訊息追加與關鍵字高亮系統 (修復局部 ID) ====================
         function appendChatText(text, sender) {
             const chatDisplay = document.getElementById('chat-display');
             
@@ -1058,15 +1059,19 @@
                     aiBox.innerHTML = `<span class="text-slate-400 font-bold text-xs block mb-1.5 uppercase tracking-wider font-mono">> AI ANALYSIS_FLOW:</span><span id="ai-text-content" class="whitespace-pre-wrap text-sm leading-relaxed"></span>`;
                     chatDisplay.appendChild(aiBox);
                 }
-                const textSpan = document.getElementById('ai-text-content');
+                
+                // 核心修復：使用 Scoped 區域限制，防止選取到舊對話盒的容器
+                const textSpan = aiBox.querySelector('#ai-text-content');
                 
                 // 動態串流加入時，若思考盒還在，則在此時將其移除
-                const loader = document.getElementById('ai-thinking-loader');
+                const loader = aiBox.querySelector('#ai-thinking-loader');
                 if (loader) {
                     loader.remove();
                 }
                 
-                textSpan.innerHTML += text;
+                if (textSpan) {
+                    textSpan.innerHTML += text;
+                }
             } 
             else if (sender === 'system') {
                 const sysBox = document.createElement('div');
@@ -1107,8 +1112,11 @@
             }
         }
 
+        // 核心修復：高亮分析同樣採用當前活躍面板 Scoped 查找
         function highlightAlertKeywords() {
-            const textSpan = document.getElementById('ai-text-content');
+            const aiBox = document.getElementById('current-ai-response-box');
+            if (!aiBox) return;
+            const textSpan = aiBox.querySelector('#ai-text-content');
             if (!textSpan) return;
 
             let currentHTML = textSpan.innerHTML;
@@ -1248,7 +1256,7 @@
                                     isFirstChunk = false;
                                     
                                     // 移除思考動畫
-                                    const loader = document.getElementById('ai-thinking-loader');
+                                    const loader = aiBox.querySelector('#ai-thinking-loader');
                                     if (loader) {
                                         loader.remove();
                                     }
@@ -1257,8 +1265,11 @@
                                 const parsed = JSON.parse(cleanLine.slice(6));
                                 const chunkContent = parsed.choices?.[0]?.delta?.content || "";
                                 if (chunkContent) {
-                                    const textSpan = document.getElementById('ai-text-content');
-                                    textSpan.textContent += chunkContent;
+                                    // 核心修復：使用 Scoped 確保 Token 流精確寫入當前對話盒
+                                    const textSpan = aiBox.querySelector('#ai-text-content');
+                                    if (textSpan) {
+                                        textSpan.textContent += chunkContent;
+                                    }
                                     chatDisplay.scrollTop = chatDisplay.scrollHeight;
                                 }
                             } catch (e) {
@@ -1273,7 +1284,7 @@
 
             } catch (err) {
                 // 出現異常時清除思考動畫，防止殘留
-                const loader = document.getElementById('ai-thinking-loader');
+                const loader = aiBox.querySelector('#ai-thinking-loader');
                 if (loader) {
                     loader.remove();
                 }
@@ -1296,6 +1307,7 @@
             resetActionBtn();
         }
 
+        // ==================== 重設狀態與清除當前 ID 屬性 (修復核心) ====================
         function resetActionBtn() {
             isGenerating = false;
             const actionBtn = document.getElementById('action-btn');
@@ -1307,6 +1319,12 @@
             const loader = document.getElementById('ai-thinking-loader');
             if (loader) {
                 loader.remove();
+            }
+
+            // 核心修復：完工時將 `ai-text-content` ID 屬性徹底移除，確保下一輪的 document.getElementById / query 完美不重複！
+            const textSpan = document.getElementById('ai-text-content');
+            if (textSpan) {
+                textSpan.removeAttribute('id');
             }
 
             const aiBox = document.getElementById('current-ai-response-box');
