@@ -4,21 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 檔案分析儀 // 淺色科技終端</title>
-    <!-- Tailwind CSS 用於現代自適應佈局 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome 6 圖標庫 -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <!-- Google 科技感字型 & 繁中字型 -->
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
-    <!-- ==================== 前端文件解析核心函式庫 ==================== -->
-    <!-- PDF.js 用於純前端 PDF 離線解析 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <!-- Mammoth.js 用於純前端 DOCX 離線解析 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-    <!-- SheetJS (XLSX) 用於純前端 Excel 試算表解析 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- JSZip 用於前端 PPTX (Zip 包) 文字拆解 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     
     <script>
@@ -144,7 +136,6 @@
 </head>
 <body class="h-screen flex flex-col overflow-hidden select-none">
 
-    <!-- 頂部系統狀態列 -->
     <header class="bg-white/90 border-b border-slate-200/80 px-6 py-3.5 flex justify-between items-center z-10 shrink-0 backdrop-blur-md">
         <div class="flex items-center space-x-3">
             <div class="w-2.5 h-2.5 rounded-full bg-sky-500 animate-ping"></div>
@@ -156,13 +147,10 @@
         </div>
     </header>
 
-    <!-- 主工作區 -->
     <div class="flex-1 flex flex-col lg:flex-row overflow-hidden z-10">
 
-        <!-- ==================== 左側設定欄 (Sidebar) ==================== -->
         <aside class="w-full lg:w-96 flex flex-col bg-white border-r border-slate-200/80 shrink-0 relative overflow-y-auto z-20">
             
-            <!-- 設定面板標題 -->
             <div class="p-6 border-b border-slate-200/80 flex items-center justify-between">
                 <div>
                     <h2 class="text-base font-bold text-slate-800 tracking-wider">
@@ -172,10 +160,8 @@
                 </div>
             </div>
 
-            <!-- 設定表單 -->
             <div class="p-6 space-y-5 flex-1">
                 
-                <!-- API Base URL -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">API 網址 (Base URL):</label>
                     <div class="relative">
@@ -186,7 +172,6 @@
                     </div>
                 </div>
 
-                <!-- API Key -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">API 金鑰 (API Key):</label>
                     <div class="relative">
@@ -200,7 +185,6 @@
                     </div>
                 </div>
 
-                <!-- System Prompt -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">系統指導提示詞 (System Prompt):</label>
                     <textarea id="system-prompt" rows="3"
@@ -208,7 +192,6 @@
                               placeholder="引導 AI 的人格與角色定位..."></textarea>
                 </div>
 
-                <!-- Model Selector -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">模型對接選擇 (Models):</label>
                     <div class="relative">
@@ -220,7 +203,6 @@
                     </div>
                 </div>
 
-                <!-- Template Selector -->
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">常用分析模板 (Templates):</label>
                     <div class="relative">
@@ -232,7 +214,6 @@
                     </div>
                 </div>
 
-                <!-- 按鈕群組 -->
                 <div class="space-y-3 pt-2">
                     <button onclick="openTemplateManager()" class="w-full flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold py-2 px-4 rounded-lg border border-sky-200 transition duration-150 text-sm">
                         <i class="fa-solid fa-pen-to-square mr-2"></i>[ 編輯模板庫 ]
@@ -265,18 +246,14 @@
             </div>
         </aside>
 
-        <!-- ==================== 右側主要內容區：極簡科技顯示牆 ==================== -->
         <main class="flex-1 flex flex-col bg-[#f8fafc]/50 overflow-hidden relative">
             
-            <!-- 視窗標頭橫幅 -->
             <div class="px-6 py-2.5 bg-white border-b border-slate-200/80 text-xs font-mono text-slate-400 flex justify-between items-center select-none shrink-0">
                 <span>>> SYSTEM WORKSPACE // TERMINAL_ACTIVE</span>
                 <span class="text-sky-500 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>ONLINE</span>
             </div>
 
-            <!-- 对話內容顯示區 (採用亮色高對比設計) -->
             <div id="chat-display" class="flex-1 overflow-y-auto p-6 space-y-6 text-slate-800 text-base leading-relaxed select-text">
-                <!-- 預設歡迎畫面 -->
                 <div class="glass-panel p-5 rounded-xl border border-slate-200/80 space-y-2.5">
                     <p class="text-sm font-bold text-slate-800 flex items-center">
                         <i class="fa-solid fa-circle-info text-sky-500 mr-2"></i>系統初始就緒
@@ -288,38 +265,31 @@
                 </div>
             </div>
 
-            <!-- 自適應科技狀態條 (Status Panel) -->
             <div class="px-6 py-3 bg-white border-t border-b border-slate-200/80 flex flex-col sm:flex-row items-center justify-between select-none shrink-0 gap-2">
                 <div class="flex items-center space-x-2 text-xs font-semibold text-slate-500">
                     <i class="fa-solid fa-cube text-sky-500"></i>
                     <span>主資料分析庫：</span>
                     <span id="file-status-label" class="text-slate-800 font-mono">0 ITEMS LOADED</span>
                 </div>
-                <!-- 讀檔進度條 -->
                 <div id="progress-container" class="hidden flex items-center space-x-3 mt-1 sm:mt-0">
                     <div class="w-36 bg-slate-100 border border-slate-200 rounded-full h-3 overflow-hidden p-0.5 relative">
-                        <!-- 加入動態 animate-stripes 以呈現科技斜紋流體推進 -->
                         <div id="progress-bar-fill" class="bg-sky-500 h-full rounded-full transition-all duration-300 animate-stripes" style="width: 0%"></div>
                     </div>
                     <span id="progress-text" class="text-[11px] font-bold font-mono text-sky-600">0%</span>
                 </div>
             </div>
 
-            <!-- 底部主要控制列 -->
             <div class="p-4 bg-white border-t border-slate-200/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
-                <!-- 檔案管理 -->
                 <button onclick="openFileManager()" class="h-11 px-5 shrink-0 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-sm rounded-lg border border-slate-200 flex items-center justify-center gap-2 transition duration-150">
                     <i class="fa-solid fa-box-open text-sky-500"></i> 檔案選取管理
                 </button>
 
-                <!-- 輸入欄位 -->
                 <div class="flex-1 relative flex items-center">
                     <input id="user-input" type="text" 
                            class="w-full h-11 bg-slate-50 text-slate-800 border border-slate-200 rounded-lg px-4 pr-12 focus:outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-100 transition duration-150 font-mono text-sm"
                            placeholder="輸入對話問題或直接點擊 [ START ] 分析...">
                 </div>
 
-                <!-- 啟動/暫停 -->
                 <button id="action-btn" onclick="sendAction()" class="h-11 px-6 bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm rounded-lg shadow-sm shadow-sky-200 transition duration-150 flex items-center justify-center gap-2 min-w-[120px]">
                     <i class="fa-solid fa-play"></i>
                     <span>[ START ]</span>
@@ -329,11 +299,9 @@
         </main>
     </div>
 
-    <!-- ==================== [Modal 1] 檔案選取管理 ==================== -->
     <div id="file-manager-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
         <div class="w-11/12 max-w-4xl bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
             
-            <!-- Modal 頂部 -->
             <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center select-none">
                 <h3 class="text-sm font-bold text-slate-800 flex items-center">
                     <i class="fa-solid fa-folder-tree text-sky-500 mr-2"></i>分析檔案檔案管理庫
@@ -343,7 +311,6 @@
                 </button>
             </div>
 
-            <!-- Modal 內容 -->
             <div class="p-6 overflow-y-auto space-y-4 flex-1 bg-slate-50/50">
                 
                 <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 bg-white p-4 border border-slate-200 rounded-xl shadow-sm">
@@ -367,7 +334,6 @@
 
             </div>
 
-            <!-- Modal 尾部 -->
             <div class="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <span id="file-summary-text" class="text-xs font-mono text-slate-500">> 已選擇: 0/0 個檔案</span>
                 <button onclick="closeFileManager()" class="w-full sm:w-auto bg-sky-500 hover:bg-sky-600 text-white font-bold py-1.5 px-6 rounded-lg text-xs transition duration-150">
@@ -378,7 +344,6 @@
         </div>
     </div>
 
-    <!-- ==================== [Modal 2] 模板管理器 ==================== -->
     <div id="template-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
         <div class="w-11/12 max-w-xl bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
             
@@ -432,7 +397,6 @@
         </div>
     </div>
 
-    <!-- ==================== [Modal 3] 提示與 CORS 排錯小視窗 ==================== -->
     <div id="custom-toast-modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
         <div class="w-11/12 max-w-lg bg-white border border-slate-200 rounded-xl shadow-2xl p-6 text-center space-y-4">
             
@@ -441,10 +405,8 @@
             </div>
             
             <div id="toast-message" class="text-xs text-slate-600 leading-relaxed text-left bg-slate-50 border border-slate-200 p-4 rounded-lg space-y-2 max-h-[300px] overflow-y-auto font-sans">
-                <!-- 動態注入異常訊息 -->
-            </div>
+                </div>
 
-            <!-- CORS 專業系統排錯說明 (Light Mode Style) -->
             <div id="cors-helper-section" class="hidden text-left bg-sky-50 border border-sky-100 p-4 rounded-lg text-xs font-sans text-sky-800 space-y-2">
                 <p class="font-bold text-sky-950"><i class="fa-solid fa-terminal mr-1.5 text-sky-500"></i>系統架構工程師的 CORS 排錯建議：</p>
                 <p>當前連線請求被瀏覽器的跨來源安全性沙盒政策 (CORS) 所阻擋。請使用以下方式排除：</p>
@@ -461,7 +423,6 @@
         </div>
     </div>
 
-    <!-- ==================== JAVASCRIPT LOGIC ==================== -->
     <script>
         const DEFAULT_CONFIG = {
             api_base_url: "https://unpurged-tamed-lois.ngrok-free.dev/v1",
@@ -1040,7 +1001,7 @@
             }
         }
 
-        // ==================== 對話區訊息追加與關鍵字高亮系統 (修復局部 ID) ====================
+        // ==================== 對話區訊息追加與關鍵字高亮系統 (修復局部 ID + 特殊 Token 過濾) ====================
         function appendChatText(text, sender) {
             const chatDisplay = document.getElementById('chat-display');
             
@@ -1060,7 +1021,6 @@
                     chatDisplay.appendChild(aiBox);
                 }
                 
-                // 核心修復：使用 Scoped 區域限制，防止選取到舊對話盒的容器
                 const textSpan = aiBox.querySelector('#ai-text-content');
                 
                 // 動態串流加入時，若思考盒還在，則在此時將其移除
@@ -1070,7 +1030,9 @@
                 }
                 
                 if (textSpan) {
-                    textSpan.innerHTML += text;
+                    // 核心修正：在此處將特殊的控制符號如 <|begin_of_box|> 和 <|end_of_box|> 即時過濾為空字串
+                    let cleanChunk = text.replace(/<\|begin_of_box\|>|<\|end_of_box\|>/g, "");
+                    textSpan.innerHTML += cleanChunk;
                 }
             } 
             else if (sender === 'system') {
@@ -1112,7 +1074,6 @@
             }
         }
 
-        // 核心修復：高亮分析同樣採用當前活躍面板 Scoped 查找
         function highlightAlertKeywords() {
             const aiBox = document.getElementById('current-ai-response-box');
             if (!aiBox) return;
@@ -1265,11 +1226,8 @@
                                 const parsed = JSON.parse(cleanLine.slice(6));
                                 const chunkContent = parsed.choices?.[0]?.delta?.content || "";
                                 if (chunkContent) {
-                                    // 核心修復：使用 Scoped 確保 Token 流精確寫入當前對話盒
-                                    const textSpan = aiBox.querySelector('#ai-text-content');
-                                    if (textSpan) {
-                                        textSpan.textContent += chunkContent;
-                                    }
+                                    // 核心修正：將接收到的串流文字交由過濾機制清洗
+                                    appendChatText(chunkContent, "ai");
                                     chatDisplay.scrollTop = chatDisplay.scrollHeight;
                                 }
                             } catch (e) {
@@ -1307,7 +1265,6 @@
             resetActionBtn();
         }
 
-        // ==================== 重設狀態與清除當前 ID 屬性 (修復核心) ====================
         function resetActionBtn() {
             isGenerating = false;
             const actionBtn = document.getElementById('action-btn');
@@ -1321,7 +1278,6 @@
                 loader.remove();
             }
 
-            // 核心修復：完工時將 `ai-text-content` ID 屬性徹底移除，確保下一輪的 document.getElementById / query 完美不重複！
             const textSpan = document.getElementById('ai-text-content');
             if (textSpan) {
                 textSpan.removeAttribute('id');
