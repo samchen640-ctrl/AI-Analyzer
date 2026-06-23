@@ -218,6 +218,10 @@
                         </select>
                         <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
                     </div>
+                    <!-- 🚀 卸載模型按鈕 (Eject VRAM) -->
+                    <button onclick="unloadModel()" class="mt-2 w-full flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-1.5 px-3 rounded-lg text-xs font-semibold transition duration-150 gap-1.5 shadow-sm">
+                        <i class="fa-solid fa-eject"></i> [ 📥 卸載此模型 (Eject VRAM) ]
+                    </button>
                 </div>
 
                 <!-- Template Selector -->
@@ -698,6 +702,65 @@
                     const isFetchErr = err.message.includes("fetch") || err.message.includes("NetworkError") || err.message.includes("Failed to fetch");
                     showToast("連線異常", `連線至指定的伺服器失敗。異常描述: ${err.message}`, isFetchErr);
                 }
+            }
+        }
+
+        // --- 📥 卸載模型功能 (Eject VRAM) ---
+        async function unloadModel() {
+            const modelSelector = document.getElementById('model-selector');
+            const selectedModel = modelSelector.value;
+            if (!selectedModel) {
+                showToast("無選定模型", "請先選擇要卸載的模型實例。");
+                return;
+            }
+
+            const baseUrl = document.getElementById('api-base-url').value.trim().replace(/\/+$/, "");
+            const apiKey = document.getElementById('api-key').value.trim();
+            const finalUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+
+            appendChatText(`\n[SYSTEM] 正在向地端發送卸載模型 [${selectedModel}] 的請求...\n`, "system");
+
+            try {
+                // 發送 POST 至 LM Studio 的 /v1/models/unload 端點
+                const response = await fetch(`${finalUrl}/models/unload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model_key: selectedModel,
+                        model_id: selectedModel
+                    })
+                });
+
+                if (response.ok) {
+                    appendChatText(`[SYSTEM] 成功卸載模型：${selectedModel}！已釋放顯卡記憶體 (VRAM)。\n`, "system");
+                    showToast("卸載成功", `已成功通知地端主機釋放模型 [${selectedModel}] 的 VRAM 資源。`);
+                    // 重新加載並整理當前可用模型列表
+                    setTimeout(() => testConnection(true), 1500);
+                } else {
+                    // 若失敗，嘗試發送全域空物件卸載
+                    const fallbackResponse = await fetch(`${finalUrl}/models/unload`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({})
+                    });
+
+                    if (fallbackResponse.ok) {
+                        appendChatText(`[SYSTEM] 成功執行全局模型退彈！已釋放顯存。\n`, "system");
+                        showToast("卸載成功", "已成功發送全局指令，地端主機已退彈所有載入的模型實例。");
+                        setTimeout(() => testConnection(true), 1500);
+                    } else {
+                        throw new Error(`伺服器拒絕請求，狀態碼: ${response.status}`);
+                    }
+                }
+            } catch (err) {
+                appendChatText(`\n[ERROR] 卸載模型失敗: ${err.message}\n`, "system");
+                showToast("卸載失敗", `無法完成卸載。請確認您的 LM Studio 版本是否支援 API 控制 Eject，或請直接在 LM Studio 介面手動點選 Eject 卸載。`);
             }
         }
 
