@@ -1043,7 +1043,7 @@
             if (totalChars > 0) {
                 statusLabel.textContent = `已載入 ${selectedCount} 個檔案 (共計 ${totalChars} 字)`;
                 
-                // 額外新增：字數超過 30,000 字（約 2 萬多 Token）時，主動開啟大文件預讀警告標籤
+                // 額外新增：字數超過 30,000 字時，主動開啟大文件預讀警告標籤
                 if (totalChars > 30000) {
                     warningBadge.classList.remove('hidden');
                 } else {
@@ -1179,6 +1179,52 @@
             }
         }
 
+        // ==================== [極致診斷] 地端超長預處理中斷說明卡 ====================
+        function showPrefillTimeoutDiagnostic(aiBox, errMsg, charCount) {
+            const textSpan = aiBox.querySelector('#ai-text-content');
+            if (!textSpan) return;
+            
+            const loader = aiBox.querySelector('#ai-thinking-loader');
+            if (loader) loader.remove();
+
+            const formattedChars = charCount.toLocaleString();
+
+            textSpan.innerHTML = `
+                <div class="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 text-slate-800 text-xs shadow-sm max-w-2xl font-sans">
+                    <div class="flex items-center space-x-2 text-amber-700 font-bold text-sm">
+                        <i class="fa-solid fa-triangle-exclamation text-base animate-bounce"></i>
+                        <span>⚠️ 系統連線異常：地端預讀（Prefill）逾時或中斷</span>
+                    </div>
+                    <p class="leading-relaxed">
+                        偵測到對話傳輸管道斷開（錯誤細節：<code class="font-mono bg-white px-1 py-0.5 rounded border text-rose-500">${errMsg}</code>）。<br>
+                        由於您當前共載入了 <span class="font-bold text-sky-600">${formattedChars} 字</span> 的大文件，此現象 100% 為以下兩點地端物理規則所致：
+                    </p>
+                    <div class="space-y-2.5 pl-1 border-l-2 border-amber-300">
+                        <div>
+                            <span class="font-bold text-slate-900">1. 外部代理通道逾時 (Proxy Read Timeout) ── [最常見原因]</span>
+                            <p class="text-slate-500 mt-0.5 pl-4">
+                                您使用的是外部公網網域（如 <code class="font-mono bg-slate-100 text-slate-700">sam-home-ai.orglab.uk</code>）。中間經過的 Nginx 代理、Cloudflare Tunnel 或 ngrok 在連線時設有 <span class="font-bold text-rose-500">60 秒</span> 的連線閒置限制。地端顯卡在高速對照如此龐大的字數（Prefill 階段）時，中間完全沒有回傳任何文字，中間代理判定連線逾時，因而強制阻斷了連線。
+                            </p>
+                        </div>
+                        <div>
+                            <span class="font-bold text-slate-900">2. 顯卡顯存溢出 (VRAM Out of Memory)</span>
+                            <p class="text-slate-500 mt-0.5 pl-4">
+                                地端顯示卡在加載巨量 Tokens 進行矩陣運算時，觸及顯存臨界上限，導致 LM Studio 運算單元瞬間重啟，使對話連線直接遺失。
+                            </p>
+                        </div>
+                    </div>
+                    <div class="pt-2.5 border-t border-amber-200">
+                        <span class="font-bold text-slate-900 block mb-1">🚀 解決指引方案：</span>
+                        <ul class="list-disc list-inside space-y-1 text-slate-600 pl-1">
+                            <li><span class="font-bold text-sky-600">強力推薦：</span>在地端電腦上直接打開瀏覽器，並改用本機直連網址 <code class="bg-white px-1.5 py-0.5 rounded border font-mono text-slate-800">http://localhost:1234/v1</code> 進行對接，即可<span class="font-bold text-slate-800">完全繞過任何外部網頁代理伺服器的逾時限制</span>！</li>
+                            <li><span class="font-bold text-slate-800">分段載入：</span>點擊「檔案選取管理」，取消勾選部分非必要文件，將單次字數控制在 30,000 字以內。</li>
+                            <li><span class="font-bold text-slate-800">調整配置：</span>在 LM Studio 的 GPU Settings 中調低 GPU Offload Layers，為上下文長度（Context Window）留出充裕的記憶體餘量。</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+
         async function sendAction() {
             if (isGenerating) {
                 stopGeneration();
@@ -1281,8 +1327,7 @@
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) {
-                        // 核心 Bug 修復：當串流自然關閉時，若 buffer 中仍殘留著最後一行（沒有被 \n 結尾）
-                        // 則手動進行一次解析，以避免「最後一句話缺漏/對話框不完整顯示」的問題
+                        // 核心 Bug 修復：當串流自然關閉時，若 buffer 中仍殘留著最後一行
                         if (buffer.trim()) {
                             parseSSELine(buffer, aiBox, chatDisplay);
                         }
@@ -1323,7 +1368,12 @@
                     appendChatText("\n[SYSTEM] 分析流程已由操作員中止。\n", "system");
                     highlightAlertKeywords();
                 } else {
-                    appendChatText(`\n[ERROR] ${err.message}\n`, "system");
+                    // 核心提問優化：如果是 first chunk 抵達之前發生 fetch error，自動導流至預讀逾時診斷卡！
+                    if (isFirstChunk) {
+                        showPrefillTimeoutDiagnostic(aiBox, err.message, combinedDocumentContent.length);
+                    } else {
+                        appendChatText(`\n[ERROR] ${err.message}\n`, "system");
+                    }
                 }
             } finally {
                 resetActionBtn();
