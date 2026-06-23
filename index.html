@@ -218,7 +218,7 @@
                         </select>
                         <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
                     </div>
-                    <!-- 🚀 卸載模型按鈕 (Eject VRAM - 多重容錯與診斷回應版) -->
+                    <!-- 🚀 卸載模型按鈕 (Eject VRAM - 已修正為官方 api/v0 規格端點) -->
                     <button onclick="unloadModel()" class="mt-2 w-full flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-1.5 px-3 rounded-lg text-xs font-semibold transition duration-150 gap-1.5 shadow-sm">
                         <i class="fa-solid fa-eject"></i> [ 📥 卸載此模型 (Eject VRAM) ]
                     </button>
@@ -286,7 +286,7 @@
                         <i class="fa-solid fa-circle-info text-sky-500 mr-2"></i>系統初始就緒
                     </p>
                     <p class="text-xs text-slate-500 leading-relaxed">
-                        請先於左側輸入您的本地或私有雲 AI 伺服器網址（例如 LM Studio、Ollama 等端點），點擊「測試連線」以自動同步模型清單。<br>
+                        請先於左側輸入您的本地或私有雲 AI 伺服器網址（例如 LM Studio 等端點），點擊「測試連線」以自動同步模型清單。<br>
                         確認後您可於下方載入 PDF、Office 檔案（Word/Excel/PowerPoint）或程式原始碼進行交叉追蹤與分析。
                     </p>
                 </div>
@@ -456,7 +456,7 @@
 
             <!-- CORS 專業系統排錯說明 (Light Mode Style) -->
             <div id="cors-helper-section" class="hidden text-left bg-sky-50 border border-sky-100 p-4 rounded-lg text-xs font-sans text-sky-800 space-y-2">
-                <p class="font-bold text-sky-950"><i class="fa-solid fa-terminal mr-1.5 text-sky-500"></i>系統架構工程師的 CORS 排錯建議：</p>
+                <p class="font-bold text-sky-950"><i class="fa-solid fa-terminal mr-1.5 text-sky-500"></i>系統架擴工程師的 CORS 排錯建議：</p>
                 <p>當前連線請求被瀏覽器的跨來源安全性沙盒政策 (CORS) 所阻擋。請使用以下方式排除：</p>
                 <ul class="list-decimal list-inside space-y-1.5 text-[11px] text-sky-700 pl-1">
                     <li><b>設定伺服器 CORS：</b>請確保您的 AI 主機（如 LM Studio 或自行部署的 API 伺服器）啟動參數中已允許跨網域存取。例如加上：<code class="bg-white px-1.5 py-0.5 rounded border border-sky-200 text-rose-500 font-mono">--cors=*</code>。</li>
@@ -705,7 +705,7 @@
             }
         }
 
-        // --- 📥 卸載模型功能 (Eject VRAM - 精確診斷 & 多重防禦輪詢) ---
+        // --- 📥 卸載模型功能 (Eject VRAM - 精確診斷 & 多重防禦 /api/v0 規格端點) ---
         async function unloadModel() {
             const modelSelector = document.getElementById('model-selector');
             const selectedModel = modelSelector.value;
@@ -715,12 +715,13 @@
             }
 
             const baseUrl = document.getElementById('api-base-url').value.trim().replace(/\/+$/, "");
+            // 核心修正：將 /v1 去除，取得 LM Studio 的 root 管理端點 (因 OpenAI 路由不支援 /unload)
+            const rootUrl = baseUrl.replace(/\/v1$/, "");
             const apiKey = document.getElementById('api-key').value.trim();
-            const finalUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
 
-            appendChatText(`\n[SYSTEM] 正在向地端發送卸載模型 [${selectedModel}] 的請求...\n`, "system");
+            appendChatText(`\n[SYSTEM] 正在向地端管理端點發送卸載模型 [${selectedModel}] 的請求...\n`, "system");
 
-            // 構建地端標準接收之多種格式
+            // 構建地端系統標準接收之格式
             const payload = {
                 model_key: selectedModel,
                 model_id: selectedModel,
@@ -728,9 +729,10 @@
             };
 
             try {
-                // 1. 嘗試官方 /v1/models/unload 複數端點
-                appendChatText(`[SYSTEM] 嘗試端點: POST ${finalUrl}/models/unload ...\n`, "system");
-                let response = await fetch(`${finalUrl}/models/unload`, {
+                // 1. 嘗試官方 /api/v0/model/unload 單數管理端點
+                const targetUrl = `${rootUrl}/api/v0/model/unload`;
+                appendChatText(`[SYSTEM] 嘗試端點: POST ${targetUrl} ...\n`, "system");
+                let response = await fetch(targetUrl, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
@@ -740,40 +742,40 @@
                 });
 
                 let responseText = await response.text();
-                appendChatText(`[SYSTEM] 主要端點回應狀態碼: ${response.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
+                appendChatText(`[SYSTEM] 管理端點回應狀態碼: ${response.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
 
-                // 2. 如果主要端點失敗，或者回應內容包含錯誤/HTML，嘗試備用單數 model/unload 
-                if (!response.ok || responseText.includes("error") || responseText.trim().startsWith("<!DOCTYPE")) {
-                    appendChatText(`[SYSTEM] 主要端點未成功，嘗試備用端點: POST ${finalUrl}/model/unload ...\n`, "system");
-                    const fallbackResponse = await fetch(`${finalUrl}/model/unload`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(payload)
-                    });
-
-                    responseText = await fallbackResponse.text();
-                    appendChatText(`[SYSTEM] 備用端點回應狀態碼: ${fallbackResponse.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
-
-                    if (fallbackResponse.ok && !responseText.includes("error")) {
-                        showToast("卸載指令已送出", `備用端點已成功退彈：${responseText}`);
-                        setTimeout(() => testConnection(true), 1500);
-                        return;
-                    }
-                } else {
-                    showToast("卸載指令已送出", `主要端點已成功退彈：${responseText}`);
+                if (response.ok && !responseText.includes("error") && !responseText.trim().startsWith("<!DOCTYPE")) {
+                    showToast("卸載成功", `已成功退彈釋放模型 [${selectedModel}] 的 VRAM 資源。`);
                     setTimeout(() => testConnection(true), 1500);
                     return;
                 }
 
-                // 如果兩個端點都有問題，或回傳內容依然是不通的
-                throw new Error("模型卸載端點請求未被 LM Studio 後台成功解析。");
+                // 2. 備用嘗試複數端點 /api/v0/models/unload
+                const backupUrl = `${rootUrl}/api/v0/models/unload`;
+                appendChatText(`[SYSTEM] 單數管理端點未成功，嘗試複數端點: POST ${backupUrl} ...\n`, "system");
+                const fallbackResponse = await fetch(backupUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                responseText = await fallbackResponse.text();
+                appendChatText(`[SYSTEM] 複數端點回應狀態碼: ${fallbackResponse.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
+
+                if (fallbackResponse.ok && !responseText.includes("error") && !responseText.trim().startsWith("<!DOCTYPE")) {
+                    showToast("卸載成功", `備用複數端點已成功退彈：${responseText}`);
+                    setTimeout(() => testConnection(true), 1500);
+                    return;
+                }
+
+                throw new Error("管理端點未正確響應卸載指令，可能返回了網頁 HTML 或 404 錯誤。");
 
             } catch (err) {
-                appendChatText(`\n[ERROR] 卸載/退彈模型失敗: ${err.message}\n`, "system");
-                showToast("卸載指令異常", `無法完成自動卸載。請確認您的 ngrok/反向代理是否放行了 unload 請求，或請直接在 LM Studio 介面點擊「Eject」按鈕釋放 VRAM。`);
+                appendChatText(`\n[ERROR] 卸載模型失敗: ${err.message}\n`, "system");
+                showToast("卸載指令異常", `自動卸載失敗。請確認您的 ngrok/反向代理是否放行了 /api/v0/ 路由，或直接在 LM Studio 介面點擊「Eject」釋放 VRAM。`);
             }
         }
 
@@ -1192,7 +1194,7 @@
                         <i class="fa-solid fa-circle-info text-sky-500 mr-2"></i>系統初始就緒
                     </p>
                     <p class="text-xs text-slate-500 leading-relaxed">
-                        請先於左側輸入您的本地或私有雲 AI 伺服器網址（例如 LM Studio、Ollama 等端點），點擊「測試連線」以自動同步模型清單。<br>
+                        請先於左側輸入您的本地或私有雲 AI 伺服器網址（例如 LM Studio 等端點），點擊「測試連線」以自動同步模型清單。<br>
                         確認後您可於下方載入 PDF、Office 檔案（Word/Excel/PowerPoint）或程式原始碼進行交叉追蹤與分析。
                     </p>
                 </div>
@@ -1279,7 +1281,7 @@
                         <div>
                             <span class="font-bold text-slate-900">1. 外部代理通道逾時 (Proxy Read Timeout) ── [最常見原因]</span>
                             <p class="text-slate-500 mt-0.5 pl-4">
-                                您使用的是外部公網網域（如 <code class="font-mono bg-slate-100 text-slate-700">sam-home-ai.orglab.uk</code>）。中間經過的 Nginx 代理、Cloudflare Tunnel 或 ngrok 在連線時設有 <span class="font-bold text-rose-500">60 秒</span> 的連線閒置限制。地端顯卡在高速對照如此龐大的字數（Prefill 階段）時，中間完全沒有回傳任何文字，中間代理判定連線逾時，因而強制阻斷了連線。
+                                您使用的是外部公網網域（如 <code class="font-mono bg-slate-100 text-slate-700">sam-home-ai.orglab.uk</code>）。中間經過的 Nginx 代理、Cloudflare Tunnel 或 ngrok 在連線時設有 <span class="font-bold text-rose-500">60 秒</span> 的連線閒置限制。地端顯卡在高速對照如此龐大的字數（Prefill 階段）時，中間代理判定連線逾時，因而強制阻斷了連線。
                             </p>
                         </div>
                         <div>
