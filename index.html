@@ -218,10 +218,6 @@
                         </select>
                         <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
                     </div>
-                    <!-- 🚀 卸載模型按鈕 (Eject VRAM - 已修正為官方 api/v0 規格端點) -->
-                    <button onclick="unloadModel()" class="mt-2 w-full flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-1.5 px-3 rounded-lg text-xs font-semibold transition duration-150 gap-1.5 shadow-sm">
-                        <i class="fa-solid fa-eject"></i> [ 📥 卸載此模型 (Eject VRAM) ]
-                    </button>
                 </div>
 
                 <!-- Template Selector -->
@@ -456,7 +452,7 @@
 
             <!-- CORS 專業系統排錯說明 (Light Mode Style) -->
             <div id="cors-helper-section" class="hidden text-left bg-sky-50 border border-sky-100 p-4 rounded-lg text-xs font-sans text-sky-800 space-y-2">
-                <p class="font-bold text-sky-950"><i class="fa-solid fa-terminal mr-1.5 text-sky-500"></i>系統架擴工程師的 CORS 排錯建議：</p>
+                <p class="font-bold text-sky-950"><i class="fa-solid fa-terminal mr-1.5 text-sky-500"></i>系統架構工程師的 CORS 排錯建議：</p>
                 <p>當前連線請求被瀏覽器的跨來源安全性沙盒政策 (CORS) 所阻擋。請使用以下方式排除：</p>
                 <ul class="list-decimal list-inside space-y-1.5 text-[11px] text-sky-700 pl-1">
                     <li><b>設定伺服器 CORS：</b>請確保您的 AI 主機（如 LM Studio 或自行部署的 API 伺服器）啟動參數中已允許跨網域存取。例如加上：<code class="bg-white px-1.5 py-0.5 rounded border border-sky-200 text-rose-500 font-mono">--cors=*</code>。</li>
@@ -702,80 +698,6 @@
                     const isFetchErr = err.message.includes("fetch") || err.message.includes("NetworkError") || err.message.includes("Failed to fetch");
                     showToast("連線異常", `連線至指定的伺服器失敗。異常描述: ${err.message}`, isFetchErr);
                 }
-            }
-        }
-
-        // --- 📥 卸載模型功能 (Eject VRAM - 精確診斷 & 多重防禦 /api/v0 規格端點) ---
-        async function unloadModel() {
-            const modelSelector = document.getElementById('model-selector');
-            const selectedModel = modelSelector.value;
-            if (!selectedModel) {
-                showToast("無選定模型", "請先選擇要卸載的模型實例。");
-                return;
-            }
-
-            const baseUrl = document.getElementById('api-base-url').value.trim().replace(/\/+$/, "");
-            // 核心修正：將 /v1 去除，取得 LM Studio 的 root 管理端點 (因 OpenAI 路由不支援 /unload)
-            const rootUrl = baseUrl.replace(/\/v1$/, "");
-            const apiKey = document.getElementById('api-key').value.trim();
-
-            appendChatText(`\n[SYSTEM] 正在向地端管理端點發送卸載模型 [${selectedModel}] 的請求...\n`, "system");
-
-            // 構建地端系統標準接收之格式
-            const payload = {
-                model_key: selectedModel,
-                model_id: selectedModel,
-                id: selectedModel
-            };
-
-            try {
-                // 1. 嘗試官方 /api/v0/model/unload 單數管理端點
-                const targetUrl = `${rootUrl}/api/v0/model/unload`;
-                appendChatText(`[SYSTEM] 嘗試端點: POST ${targetUrl} ...\n`, "system");
-                let response = await fetch(targetUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                let responseText = await response.text();
-                appendChatText(`[SYSTEM] 管理端點回應狀態碼: ${response.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
-
-                if (response.ok && !responseText.includes("error") && !responseText.trim().startsWith("<!DOCTYPE")) {
-                    showToast("卸載成功", `已成功退彈釋放模型 [${selectedModel}] 的 VRAM 資源。`);
-                    setTimeout(() => testConnection(true), 1500);
-                    return;
-                }
-
-                // 2. 備用嘗試複數端點 /api/v0/models/unload
-                const backupUrl = `${rootUrl}/api/v0/models/unload`;
-                appendChatText(`[SYSTEM] 單數管理端點未成功，嘗試複數端點: POST ${backupUrl} ...\n`, "system");
-                const fallbackResponse = await fetch(backupUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                responseText = await fallbackResponse.text();
-                appendChatText(`[SYSTEM] 複數端點回應狀態碼: ${fallbackResponse.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
-
-                if (fallbackResponse.ok && !responseText.includes("error") && !responseText.trim().startsWith("<!DOCTYPE")) {
-                    showToast("卸載成功", `備用複數端點已成功退彈：${responseText}`);
-                    setTimeout(() => testConnection(true), 1500);
-                    return;
-                }
-
-                throw new Error("管理端點未正確響應卸載指令，可能返回了網頁 HTML 或 404 錯誤。");
-
-            } catch (err) {
-                appendChatText(`\n[ERROR] 卸載模型失敗: ${err.message}\n`, "system");
-                showToast("卸載指令異常", `自動卸載失敗。請確認您的 ngrok/反向代理是否放行了 /api/v0/ 路由，或直接在 LM Studio 介面點擊「Eject」釋放 VRAM。`);
             }
         }
 
@@ -1104,6 +1026,7 @@
             }
         }
 
+        // 同步被勾選文件總計
         function syncFilesToContent() {
             let selectedCount = 0;
             let totalChars = 0;
@@ -1336,7 +1259,7 @@
             aiBox.id = 'current-ai-response-box';
             aiBox.className = "bg-white border border-slate-200 p-5 rounded-xl shadow-sm text-slate-800 font-sans my-3 max-w-3xl";
             
-            // 寫入帶o動態脈衝微粒子「AI 思考動畫」的初始盒子
+            // 寫入帶動態脈衝微粒子「AI 思考動畫」的初始盒子
             aiBox.innerHTML = `
                 <span class="text-slate-400 font-bold text-xs block mb-1.5 uppercase tracking-wider font-mono">> AI ANALYSIS_FLOW:</span>
                 <span id="ai-text-content" class="whitespace-pre-wrap text-sm leading-relaxed">
@@ -1455,6 +1378,7 @@
             }
         }
 
+        // 中止生成
         function stopGeneration() {
             if (abortController) {
                 abortController.abort();
