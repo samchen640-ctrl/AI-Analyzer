@@ -218,7 +218,7 @@
                         </select>
                         <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
                     </div>
-                    <!-- 🚀 卸載模型按鈕 (Eject VRAM) -->
+                    <!-- 🚀 卸載模型按鈕 (Eject VRAM - 多重容錯與診斷回應版) -->
                     <button onclick="unloadModel()" class="mt-2 w-full flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-1.5 px-3 rounded-lg text-xs font-semibold transition duration-150 gap-1.5 shadow-sm">
                         <i class="fa-solid fa-eject"></i> [ 📥 卸載此模型 (Eject VRAM) ]
                     </button>
@@ -705,7 +705,7 @@
             }
         }
 
-        // --- 📥 卸載模型功能 (Eject VRAM) ---
+        // --- 📥 卸載模型功能 (Eject VRAM - 精確診斷 & 多重防禦輪詢) ---
         async function unloadModel() {
             const modelSelector = document.getElementById('model-selector');
             const selectedModel = modelSelector.value;
@@ -720,47 +720,60 @@
 
             appendChatText(`\n[SYSTEM] 正在向地端發送卸載模型 [${selectedModel}] 的請求...\n`, "system");
 
+            // 構建地端標準接收之多種格式
+            const payload = {
+                model_key: selectedModel,
+                model_id: selectedModel,
+                id: selectedModel
+            };
+
             try {
-                // 發送 POST 至 LM Studio 的 /v1/models/unload 端點
-                const response = await fetch(`${finalUrl}/models/unload`, {
+                // 1. 嘗試官方 /v1/models/unload 複數端點
+                appendChatText(`[SYSTEM] 嘗試端點: POST ${finalUrl}/models/unload ...\n`, "system");
+                let response = await fetch(`${finalUrl}/models/unload`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        model_key: selectedModel,
-                        model_id: selectedModel
-                    })
+                    body: JSON.stringify(payload)
                 });
 
-                if (response.ok) {
-                    appendChatText(`[SYSTEM] 成功卸載模型：${selectedModel}！已釋放顯卡記憶體 (VRAM)。\n`, "system");
-                    showToast("卸載成功", `已成功通知地端主機釋放模型 [${selectedModel}] 的 VRAM 資源。`);
-                    // 重新加載並整理當前可用模型列表
-                    setTimeout(() => testConnection(true), 1500);
-                } else {
-                    // 若失敗，嘗試發送全域空物件卸載
-                    const fallbackResponse = await fetch(`${finalUrl}/models/unload`, {
+                let responseText = await response.text();
+                appendChatText(`[SYSTEM] 主要端點回應狀態碼: ${response.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
+
+                // 2. 如果主要端點失敗，或者回應內容包含錯誤/HTML，嘗試備用單數 model/unload 
+                if (!response.ok || responseText.includes("error") || responseText.trim().startsWith("<!DOCTYPE")) {
+                    appendChatText(`[SYSTEM] 主要端點未成功，嘗試備用端點: POST ${finalUrl}/model/unload ...\n`, "system");
+                    const fallbackResponse = await fetch(`${finalUrl}/model/unload`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${apiKey}`,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({})
+                        body: JSON.stringify(payload)
                     });
 
-                    if (fallbackResponse.ok) {
-                        appendChatText(`[SYSTEM] 成功執行全局模型退彈！已釋放顯存。\n`, "system");
-                        showToast("卸載成功", "已成功發送全局指令，地端主機已退彈所有載入的模型實例。");
+                    responseText = await fallbackResponse.text();
+                    appendChatText(`[SYSTEM] 備用端點回應狀態碼: ${fallbackResponse.status} | 內容: ${responseText || "(無回傳內容)"}\n`, "system");
+
+                    if (fallbackResponse.ok && !responseText.includes("error")) {
+                        showToast("卸載指令已送出", `備用端點已成功退彈：${responseText}`);
                         setTimeout(() => testConnection(true), 1500);
-                    } else {
-                        throw new Error(`伺服器拒絕請求，狀態碼: ${response.status}`);
+                        return;
                     }
+                } else {
+                    showToast("卸載指令已送出", `主要端點已成功退彈：${responseText}`);
+                    setTimeout(() => testConnection(true), 1500);
+                    return;
                 }
+
+                // 如果兩個端點都有問題，或回傳內容依然是不通的
+                throw new Error("模型卸載端點請求未被 LM Studio 後台成功解析。");
+
             } catch (err) {
-                appendChatText(`\n[ERROR] 卸載模型失敗: ${err.message}\n`, "system");
-                showToast("卸載失敗", `無法完成卸載。請確認您的 LM Studio 版本是否支援 API 控制 Eject，或請直接在 LM Studio 介面手動點選 Eject 卸載。`);
+                appendChatText(`\n[ERROR] 卸載/退彈模型失敗: ${err.message}\n`, "system");
+                showToast("卸載指令異常", `無法完成自動卸載。請確認您的 ngrok/反向代理是否放行了 unload 請求，或請直接在 LM Studio 介面點擊「Eject」按鈕釋放 VRAM。`);
             }
         }
 
@@ -1154,7 +1167,7 @@
             } 
             else if (sender === 'system') {
                 const sysBox = document.createElement('div');
-                sysBox.className = "text-slate-400 text-xs font-mono my-2 tracking-wide pl-2 border-l border-slate-200";
+                sysBox.className = "text-slate-400 text-xs font-mono my-2 tracking-wide pl-2 border-l border-slate-200 text-slate-500 whitespace-pre-wrap";
                 sysBox.textContent = text;
                 chatDisplay.appendChild(sysBox);
             }
@@ -1321,7 +1334,7 @@
             aiBox.id = 'current-ai-response-box';
             aiBox.className = "bg-white border border-slate-200 p-5 rounded-xl shadow-sm text-slate-800 font-sans my-3 max-w-3xl";
             
-            // 寫入帶有動態脈衝微粒子「AI 思考動畫」的初始盒子
+            // 寫入帶o動態脈衝微粒子「AI 思考動畫」的初始盒子
             aiBox.innerHTML = `
                 <span class="text-slate-400 font-bold text-xs block mb-1.5 uppercase tracking-wider font-mono">> AI ANALYSIS_FLOW:</span>
                 <span id="ai-text-content" class="whitespace-pre-wrap text-sm leading-relaxed">
@@ -1369,10 +1382,7 @@
                     },
                     body: JSON.stringify({
                         model: selectedModel,
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: promptPayload }
-                        ],
+                        messages: [{"role": "system", "content": systemPrompt}, {"role": "user", "content": promptPayload}],
                         stream: true
                     }),
                     signal: abortController.signal
