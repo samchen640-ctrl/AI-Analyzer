@@ -1158,14 +1158,17 @@
         }
 
         // ==================== Token 估算輔助函式 ====================
+        // 使用略為保守的估算公式，避免低估實際 token 數
         function estimateTokenCount(text) {
             if (!text) return 0;
             let count = 0;
             for (const ch of text) {
                 if (ch.charCodeAt(0) > 127) {
-                    count += 1.5;
+                    count += 2.0;     // 中文字元保守估 2 token
+                } else if (ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t') {
+                    count += 0.2;     // 空白/換行較輕
                 } else {
-                    count += 0.25;
+                    count += 0.3;     // 英文字元保守估 0.3 token
                 }
             }
             return Math.ceil(count);
@@ -1178,24 +1181,26 @@
             attachedFiles.forEach(f => {
                 if (f.selected) fileContent += f.content;
             });
+            // 訊息 JSON 格式額外開銷：role 標記、金鑰等約 +8%
             const totalText = systemPrompt + '\n' + fileContent + '\n' + userText;
-            return estimateTokenCount(totalText);
+            return Math.ceil(estimateTokenCount(totalText) * 1.08);
         }
 
         function updateTokenDisplay() {
             const tokenEl = document.getElementById('token-count-display');
             if (!tokenEl) return;
             const estimated = getTotalEstimatedTokens();
-            const maxTokens = 4096;
-            const ratio = (estimated / maxTokens * 100).toFixed(0);
-            tokenEl.textContent = `Token: ~${estimated.toLocaleString()} (${ratio}%)`;
+            const maxContext = 131072;
+            const ratio = (estimated / maxContext * 100).toFixed(1);
+            const pct = parseFloat(ratio);
+            tokenEl.textContent = `Token: ~${estimated.toLocaleString()} / ${maxContext.toLocaleString()} (${ratio}%)`;
             tokenEl.className = 'font-mono text-xs';
-            if (estimated > maxTokens * 0.9) {
+            if (pct > 90) {
                 tokenEl.classList.add('text-rose-500', 'font-bold');
-                tokenEl.classList.remove('text-slate-500');
-            } else if (estimated > maxTokens * 0.7) {
+                tokenEl.classList.remove('text-slate-500', 'text-amber-500');
+            } else if (pct > 70) {
                 tokenEl.classList.add('text-amber-500', 'font-bold');
-                tokenEl.classList.remove('text-slate-500');
+                tokenEl.classList.remove('text-slate-500', 'text-rose-500');
             } else {
                 tokenEl.classList.add('text-slate-500');
                 tokenEl.classList.remove('text-rose-500', 'text-amber-500', 'font-bold');
@@ -1377,8 +1382,12 @@
                 : userText;
 
             abortController = new AbortController();
+            const firstChunkTimeoutMs = 180000; // 180 秒內若無第一個 chunk 視為逾時
 
             try {
+                // 更新狀態：正在等待伺服器預處理
+                document.getElementById('file-status-label').textContent = `等待伺服器預處理中 (${(estimatedTokens * 1.5 / 1000).toFixed(0)}K tokens)...`;
+
                 const response = await fetch(`${finalUrl}/chat/completions`, {
                     method: 'POST',
                     headers: {
@@ -1420,10 +1429,17 @@
                 let buffer = "";
                 let isFirstChunk = true;
 
+                // 第一個 chunk 逾時計時器：若超過 timeLimit 毫秒仍未收到第一個 chunk，自行 abort
+                let firstChunkTimer = setTimeout(() => {
+                    if (isFirstChunk) {
+                        abortController.abort();
+                    }
+                }, firstChunkTimeoutMs);
+
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) {
-                        // 核心 Bug 修復：當串流自然關閉時，若 buffer 中仍殘留著最後一行
+                        clearTimeout(firstChunkTimer);
                         if (buffer.trim()) {
                             parseSSELine(buffer, aiBox, chatDisplay);
                         }
@@ -1432,15 +1448,14 @@
 
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split("\n");
-                    buffer = lines.pop(); // 將最後一行不完整的片段存留至緩衝區
+                    buffer = lines.pop();
 
                     for (const line of lines) {
-                        // 當接收到任何合法的 SSE 開頭，即判定為首個 Chunk 抵達
                         if (isFirstChunk && line.trim().startsWith("data: ")) {
+                            clearTimeout(firstChunkTimer);
                             document.getElementById('file-status-label').textContent = "RECEIVING CHUNKS...";
                             isFirstChunk = false;
                             
-                            // 移除思考動畫
                             const loader = aiBox.querySelector('#ai-thinking-loader');
                             if (loader) {
                                 loader.remove();
@@ -1460,14 +1475,22 @@
                 }
 
                 if (err.name === 'AbortError') {
-                    appendChatText("\n[SYSTEM] 分析流程已由操作員中止。\n", "system");
+                    if (isFirstChunk) {
+                        appendChatText(`\n[⚠️ 伺服器預處理逾時] 已等待超過 ${(firstChunkTimeoutMs / 1000 / 60).toFixed(0)} 分鐘仍未收到回應。\n`, "system");
+                        appendChatText(`[📊] 當前 Token 估算約 ${estimatedTokens.toLocaleString()}（模型上限 ${131072}），\n`, "system");
+                        appendChatText(`[🔧 可能原因與建議]\n`, "system");
+                        appendChatText(`  1. Cloudflare Tunnel 預設連線逾時約 60~100 秒，Prefill 53K tokens 耗時過長被 CF 中斷。\n`, "system");
+                        appendChatText(`  2. 改用本機連線 http://localhost:1234/v1 可完全繞過 Cloudflare 外部限制。\n`, "system");
+                        appendChatText(`  3. 或調整 cloudflared 參數：加長逾時限制 (--http-upstream-timeout 300)。\n`, "system");
+                        appendChatText(`  4. 減少檔案數量，將 tokens 壓在 20K 以下可大幅加快 prefill。\n`, "system");
+                    } else {
+                        appendChatText("\n[SYSTEM] 分析流程已由操作員中止。\n", "system");
+                    }
                     highlightAlertKeywords();
                 } else if (err.name === 'TypeError' && isFirstChunk) {
-                    // 網路層級錯誤（fetch 失敗）且尚未收到任何 chunk → 預讀逾時診斷
                     showPrefillTimeoutDiagnostic(aiBox, err.message, combinedDocumentContent.length);
                 } else {
                     appendChatText(`\n[ERROR] ${err.message}\n`, "system");
-                    // 若為 token 相關錯誤，附加建議
                     if (err.message.toLowerCase().includes("context") ||
                         err.message.toLowerCase().includes("token") ||
                         err.message.toLowerCase().includes("maximum length")) {
