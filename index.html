@@ -296,6 +296,9 @@
                         <span>主資料分析庫：</span>
                         <span id="file-status-label" class="text-slate-800 font-mono">0 ITEMS LOADED</span>
                     </div>
+                    <div class="flex items-center space-x-2 text-xs">
+                        <span id="token-count-display" class="text-slate-500 font-mono text-xs">Token: ~0 (0%)</span>
+                    </div>
                     <!-- 大文件預讀與超時預警燈 -->
                     <div id="context-warning-badge" class="hidden inline-flex items-center space-x-1.5 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-600 text-[10px] font-medium font-sans animate-pulse" title="大字數預警">
                         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -1054,6 +1057,7 @@
                 statusLabel.textContent = "0 ITEMS LOADED";
                 warningBadge.classList.add('hidden');
             }
+            updateTokenDisplay();
         }
 
         // ==================== 對話區訊息追加與關鍵字高亮系統 (修復局部 ID + 特殊 Token 過濾) ====================
@@ -1153,6 +1157,51 @@
             return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
         }
 
+        // ==================== Token 估算輔助函式 ====================
+        function estimateTokenCount(text) {
+            if (!text) return 0;
+            let count = 0;
+            for (const ch of text) {
+                if (ch.charCodeAt(0) > 127) {
+                    count += 1.5;
+                } else {
+                    count += 0.25;
+                }
+            }
+            return Math.ceil(count);
+        }
+
+        function getTotalEstimatedTokens() {
+            const systemPrompt = document.getElementById('system-prompt').value || '';
+            const userText = document.getElementById('user-input').value.trim();
+            let fileContent = '';
+            attachedFiles.forEach(f => {
+                if (f.selected) fileContent += f.content;
+            });
+            const totalText = systemPrompt + '\n' + fileContent + '\n' + userText;
+            return estimateTokenCount(totalText);
+        }
+
+        function updateTokenDisplay() {
+            const tokenEl = document.getElementById('token-count-display');
+            if (!tokenEl) return;
+            const estimated = getTotalEstimatedTokens();
+            const maxTokens = 4096;
+            const ratio = (estimated / maxTokens * 100).toFixed(0);
+            tokenEl.textContent = `Token: ~${estimated.toLocaleString()} (${ratio}%)`;
+            tokenEl.className = 'font-mono text-xs';
+            if (estimated > maxTokens * 0.9) {
+                tokenEl.classList.add('text-rose-500', 'font-bold');
+                tokenEl.classList.remove('text-slate-500');
+            } else if (estimated > maxTokens * 0.7) {
+                tokenEl.classList.add('text-amber-500', 'font-bold');
+                tokenEl.classList.remove('text-slate-500');
+            } else {
+                tokenEl.classList.add('text-slate-500');
+                tokenEl.classList.remove('text-rose-500', 'text-amber-500', 'font-bold');
+            }
+        }
+
         // ==================== 核心 SSE 串流解析函數 ====================
         function parseSSELine(line, aiBox, chatDisplay) {
             const cleanLine = line.trim();
@@ -1170,9 +1219,30 @@
                         chatDisplay.scrollTop = chatDisplay.scrollHeight;
                     }
 
-                    // 核心提問修正：精確攔截與顯示「超過 Token 限制」的 finish_reason
-                    if (parsed.choices?.[0]?.finish_reason === "length") {
-                        appendChatText("\n\n[⚠️ 系統提示：已達到模型單次輸出上限（Max Tokens Exceeded），回覆已被截斷。]", "system");
+                    // 攔截 finish_reason，精確顯示回覆截斷原因
+                    const finishReason = parsed.choices?.[0]?.finish_reason;
+                    if (finishReason === "length") {
+                        appendChatText("\n\n[⚠️ 系統提示：已達到模型單次輸出上限（Max Tokens），回覆已被截斷。可嘗試調整模型 max_tokens 參數或分段提問。]", "system");
+                    } else if (finishReason === "stop") {
+                        // 正常結束，不另提示
+                    } else if (finishReason === "content_filter") {
+                        appendChatText("\n\n[⚠️ 系統提示：回覆因內容過濾政策而被中斷（Content Filter）。]", "system");
+                    } else if (finishReason === "null" || finishReason === null) {
+                        // 串流進行中，忽略
+                    } else if (finishReason && finishReason !== "stop") {
+                        appendChatText(`\n\n[⚠️ 系統通知：回覆結束原因為「${finishReason}」。]`, "system");
+                    }
+
+                    // 若 API 有回傳 usage 資訊（stream_options include_usage），顯示 token 用量
+                    if (parsed.usage) {
+                        const usage = parsed.usage;
+                        const parts = [];
+                        if (usage.prompt_tokens !== undefined) parts.push(`輸入 ${usage.prompt_tokens}`);
+                        if (usage.completion_tokens !== undefined) parts.push(`輸出 ${usage.completion_tokens}`);
+                        if (usage.total_tokens !== undefined) parts.push(`總計 ${usage.total_tokens}`);
+                        if (parts.length > 0) {
+                            appendChatText(`\n[Token 用量] ${parts.join(' / ')}\n`, "system");
+                        }
                     }
                 } catch (e) {
                     // 略過未傳送完整的 JSON 片段
@@ -1244,6 +1314,16 @@
 
             if (!userText && !combinedDocumentContent) return;
 
+            // Token 預檢：超過臨界值時跳出警示
+            const estimatedTokens = getTotalEstimatedTokens();
+            if (estimatedTokens > 128000) {
+                appendChatText(`\n[⚠️ 系統警示] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，已超過多數模型的上下文上限（128K）。請減少檔案數量後重試。\n`, "system");
+                resetActionBtn();
+                return;
+            } else if (estimatedTokens > 32000) {
+                appendChatText(`\n[⚠️ 系統提醒] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，部分模型可能無法處理。若 API 回傳錯誤請減少檔案。\n`, "system");
+            }
+
             isGenerating = true;
             const actionBtn = document.getElementById('action-btn');
             actionBtn.classList.remove('bg-sky-500', 'hover:bg-sky-600');
@@ -1308,13 +1388,31 @@
                     body: JSON.stringify({
                         model: selectedModel,
                         messages: [{"role": "system", "content": systemPrompt}, {"role": "user", "content": promptPayload}],
-                        stream: true
+                        stream: true,
+                        stream_options: {"include_usage": true}
                     }),
                     signal: abortController.signal
                 });
 
                 if (!response.ok) {
-                    throw new Error(`API 請求失敗，狀態碼: ${response.status}`);
+                    let errorMsg = `API 請求失敗，狀態碼: ${response.status}`;
+                    try {
+                        const errorBody = await response.json();
+                        if (errorBody?.error?.message) {
+                            errorMsg += ` - ${errorBody.error.message}`;
+                            if (errorBody.error.code === "context_length_exceeded" ||
+                                errorBody.error.message?.toLowerCase().includes("context length") ||
+                                errorBody.error.message?.toLowerCase().includes("token limit") ||
+                                errorBody.error.message?.toLowerCase().includes("maximum context") ||
+                                errorBody.error.message?.toLowerCase().includes("too many tokens")) {
+                                appendChatText(`\n[⚠️ Token 超過限制] ${errorBody.error.message}\n`, "system");
+                                appendChatText("\n[🔧 建議] 請減少上傳檔案數量或縮短提問內容，再重新送出。\n", "system");
+                                resetActionBtn();
+                                return;
+                            }
+                        }
+                    } catch (_) {}
+                    throw new Error(errorMsg);
                 }
 
                 const reader = response.body.getReader();
@@ -1356,7 +1454,6 @@
                 appendChatText("\n" + "-".repeat(30) + "\n", "system");
 
             } catch (err) {
-                // 出現異常時清除思考動畫，防止殘留
                 const loader = aiBox.querySelector('#ai-thinking-loader');
                 if (loader) {
                     loader.remove();
@@ -1365,12 +1462,16 @@
                 if (err.name === 'AbortError') {
                     appendChatText("\n[SYSTEM] 分析流程已由操作員中止。\n", "system");
                     highlightAlertKeywords();
+                } else if (err.name === 'TypeError' && isFirstChunk) {
+                    // 網路層級錯誤（fetch 失敗）且尚未收到任何 chunk → 預讀逾時診斷
+                    showPrefillTimeoutDiagnostic(aiBox, err.message, combinedDocumentContent.length);
                 } else {
-                    // 核心提問優化：如果是 first chunk 抵達之前發生 fetch error，自動導流至預讀逾時診斷卡！
-                    if (isFirstChunk) {
-                        showPrefillTimeoutDiagnostic(aiBox, err.message, combinedDocumentContent.length);
-                    } else {
-                        appendChatText(`\n[ERROR] ${err.message}\n`, "system");
+                    appendChatText(`\n[ERROR] ${err.message}\n`, "system");
+                    // 若為 token 相關錯誤，附加建議
+                    if (err.message.toLowerCase().includes("context") ||
+                        err.message.toLowerCase().includes("token") ||
+                        err.message.toLowerCase().includes("maximum length")) {
+                        appendChatText("\n[🔧 建議] 請減少檔案數量或縮短提問，或更換支援更長上下文的模型。\n", "system");
                     }
                 }
             } finally {
@@ -1417,6 +1518,9 @@
                 sendAction();
             }
         });
+
+        document.getElementById('user-input').addEventListener('input', updateTokenDisplay);
+        document.getElementById('system-prompt').addEventListener('input', updateTokenDisplay);
     </script>
 </body>
 </html>
