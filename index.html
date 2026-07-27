@@ -1190,7 +1190,7 @@
             const tokenEl = document.getElementById('token-count-display');
             if (!tokenEl) return;
             const estimated = getTotalEstimatedTokens();
-            const maxContext = 131072;
+            const maxContext = 262144;
             const ratio = (estimated / maxContext * 100).toFixed(1);
             const pct = parseFloat(ratio);
             tokenEl.textContent = `Token: ~${estimated.toLocaleString()} / ${maxContext.toLocaleString()} (${ratio}%)`;
@@ -1321,7 +1321,7 @@
 
             // Token 預檢：超過臨界值時跳出警示
             const estimatedTokens = getTotalEstimatedTokens();
-            if (estimatedTokens > 128000) {
+            if (estimatedTokens > 256000) {
                 appendChatText(`\n[⚠️ 系統警示] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，已超過多數模型的上下文上限（128K）。請減少檔案數量後重試。\n`, "system");
                 resetActionBtn();
                 return;
@@ -1477,7 +1477,7 @@
                 if (err.name === 'AbortError') {
                     if (isFirstChunk) {
                         appendChatText(`\n[⚠️ 伺服器預處理逾時] 已等待超過 ${(firstChunkTimeoutMs / 1000 / 60).toFixed(0)} 分鐘仍未收到回應。\n`, "system");
-                        appendChatText(`[📊] 當前 Token 估算約 ${estimatedTokens.toLocaleString()}（模型上限 ${131072}），\n`, "system");
+                        appendChatText(`[📊] 當前 Token 估算約 ${estimatedTokens.toLocaleString()}（模型上限 ${262144}），\n`, "system");
                         appendChatText(`[🔧 可能原因與建議]\n`, "system");
                         appendChatText(`  1. Cloudflare Tunnel 預設連線逾時約 60~100 秒，Prefill 53K tokens 耗時過長被 CF 中斷。\n`, "system");
                         appendChatText(`  2. 改用本機連線 http://localhost:1234/v1 可完全繞過 Cloudflare 外部限制。\n`, "system");
