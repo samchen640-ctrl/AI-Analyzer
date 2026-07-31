@@ -489,6 +489,7 @@
         let attachedFiles = [];
         let isGenerating = false;
         let abortController = null;
+        let modelContextMap = {}; // 記錄每個 model 的上下文長度
 
         // --- 初始化讀取 ---
         window.addEventListener('DOMContentLoaded', () => {
@@ -675,18 +676,61 @@
                 }
 
                 if (modelList.length > 0) {
+                    // 嘗試從 LM Studio 專屬 REST API 取得各模型的上下文長度
+                    modelContextMap = {};
+                    try {
+                        const rootUrl = finalUrl.replace(/\/v1$/, "");
+                        const restController = new AbortController();
+                        const restTimeout = setTimeout(() => restController.abort(), 5000);
+                        const restResponse = await fetch(`${rootUrl}/api/v0/models`, {
+                            method: 'GET',
+                            headers: { 'Authorization': `Bearer ${apiKey}` },
+                            signal: restController.signal
+                        });
+                        clearTimeout(restTimeout);
+                        if (restResponse.ok) {
+                            const restData = await restResponse.json();
+                            const restModels = restData.data || restData.models || [];
+                            restModels.forEach(m => {
+                                if (m.id) {
+                                    // 優先使用實際載入的 context_length（使用者實際設定值）
+                                    let effectiveCtx = null;
+                                    if (m.loaded_instances && m.loaded_instances.length > 0) {
+                                        const cfg = m.loaded_instances[0].config;
+                                        if (cfg && cfg.context_length) effectiveCtx = cfg.context_length;
+                                    }
+                                    if (effectiveCtx === null && m.max_context_length) {
+                                        effectiveCtx = m.max_context_length;
+                                    }
+                                    if (effectiveCtx === null && m.context_length) {
+                                        effectiveCtx = m.context_length;
+                                    }
+                                    if (effectiveCtx) {
+                                        modelContextMap[m.id] = effectiveCtx;
+                                    }
+                                }
+                            });
+                        }
+                    } catch (_) {
+                        // REST API 可能不可用，忽略並使用預設
+                    }
+
                     const selector = document.getElementById('model-selector');
                     selector.innerHTML = '';
                     modelList.forEach(modelId => {
                         const opt = document.createElement('option');
                         opt.value = modelId;
-                        opt.textContent = modelId;
+                        const ctx = modelContextMap[modelId];
+                        opt.textContent = ctx ? `${modelId} (ctx: ${ctx.toLocaleString()})` : modelId;
                         selector.appendChild(opt);
                     });
-                    
-                    appendChatText(`[SYSTEM] 連線成功！解析出 ${modelList.length} 個可用模組實例。\n`, "system");
+
+                    const contextSummary = Object.keys(modelContextMap).length > 0
+                        ? `偵測到 ${Object.keys(modelContextMap).length} 個模型上下文長度`
+                        : "未取得上下文資訊";
+                    appendChatText(`[SYSTEM] 連線成功！解析出 ${modelList.length} 個可用模組實例（${contextSummary}）。\n`, "system");
                     if (!isSilent) {
-                        showToast("連線成功", `對接極限流暢！取得可用模型：${modelList.join(", ")}`);
+                        showToast("連線成功", `取得可用模型：${modelList.join(", ")}\n${contextSummary}`);
                     }
                 } else {
                     throw new Error("模型格式列表解析不正確。");
@@ -1186,11 +1230,20 @@
             return Math.ceil(estimateTokenCount(totalText) * 1.08);
         }
 
+        function getSelectedModelContextLength() {
+            const selector = document.getElementById('model-selector');
+            const modelId = selector ? selector.value : "";
+            if (modelId && modelContextMap[modelId]) {
+                return modelContextMap[modelId];
+            }
+            return 131072; // 預設值，若無法取得則使用 128K
+        }
+
         function updateTokenDisplay() {
             const tokenEl = document.getElementById('token-count-display');
             if (!tokenEl) return;
             const estimated = getTotalEstimatedTokens();
-            const maxContext = 262144;
+            const maxContext = getSelectedModelContextLength();
             const ratio = (estimated / maxContext * 100).toFixed(1);
             const pct = parseFloat(ratio);
             tokenEl.textContent = `Token: ~${estimated.toLocaleString()} / ${maxContext.toLocaleString()} (${ratio}%)`;
@@ -1319,14 +1372,16 @@
 
             if (!userText && !combinedDocumentContent) return;
 
-            // Token 預檢：超過臨界值時跳出警示
+            // Token 預檢：以選定模型的實際上下文長度為依據
             const estimatedTokens = getTotalEstimatedTokens();
-            if (estimatedTokens > 256000) {
-                appendChatText(`\n[⚠️ 系統警示] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，已超過多數模型的上下文上限（128K）。請減少檔案數量後重試。\n`, "system");
+            const selectedModelCtx = getSelectedModelContextLength();
+            const safeLimit = Math.floor(selectedModelCtx * 0.8);
+            if (estimatedTokens > safeLimit) {
+                appendChatText(`\n[⚠️ 系統警示] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，已超過所選模型可用上下文的 80%（${safeLimit.toLocaleString()}）。請減少檔案數量後重試。\n`, "system");
                 resetActionBtn();
                 return;
-            } else if (estimatedTokens > 32000) {
-                appendChatText(`\n[⚠️ 系統提醒] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，部分模型可能無法處理。若 API 回傳錯誤請減少檔案。\n`, "system");
+            } else if (estimatedTokens > Math.floor(selectedModelCtx * 0.5)) {
+                appendChatText(`\n[⚠️ 系統提醒] 當前總輸入約 ${estimatedTokens.toLocaleString()} Tokens，佔所選模型上下文（${selectedModelCtx.toLocaleString()}）的一半以上，prefill 時間可能較長。\n`, "system");
             }
 
             isGenerating = true;
@@ -1477,9 +1532,9 @@
                 if (err.name === 'AbortError') {
                     if (isFirstChunk) {
                         appendChatText(`\n[⚠️ 伺服器預處理逾時] 已等待超過 ${(firstChunkTimeoutMs / 1000 / 60).toFixed(0)} 分鐘仍未收到回應。\n`, "system");
-                        appendChatText(`[📊] 當前 Token 估算約 ${estimatedTokens.toLocaleString()}（模型上限 ${262144}），\n`, "system");
+                        appendChatText(`[📊] 當前 Token 估算約 ${estimatedTokens.toLocaleString()}（所選模型上下文上限 ${getSelectedModelContextLength().toLocaleString()}），\n`, "system");
                         appendChatText(`[🔧 可能原因與建議]\n`, "system");
-                        appendChatText(`  1. Cloudflare Tunnel 預設連線逾時約 60~100 秒，Prefill 53K tokens 耗時過長被 CF 中斷。\n`, "system");
+                        appendChatText(`  1. Cloudflare Tunnel 預設連線逾時約 60~100 秒，Prefill 耗時過長被 CF 中斷。\n`, "system");
                         appendChatText(`  2. 改用本機連線 http://localhost:1234/v1 可完全繞過 Cloudflare 外部限制。\n`, "system");
                         appendChatText(`  3. 或調整 cloudflared 參數：加長逾時限制 (--http-upstream-timeout 300)。\n`, "system");
                         appendChatText(`  4. 減少檔案數量，將 tokens 壓在 20K 以下可大幅加快 prefill。\n`, "system");
@@ -1544,6 +1599,7 @@
 
         document.getElementById('user-input').addEventListener('input', updateTokenDisplay);
         document.getElementById('system-prompt').addEventListener('input', updateTokenDisplay);
+        document.getElementById('model-selector').addEventListener('change', updateTokenDisplay);
     </script>
 </body>
 </html>
