@@ -218,11 +218,7 @@
                         </select>
                         <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xs"></i>
                     </div>
-                    <label class="flex items-center space-x-2 mt-2 text-[11px] text-slate-500 cursor-pointer select-none">
-                        <input type="checkbox" id="protect-loaded-model" class="w-3.5 h-3.5 text-sky-600 border-slate-300 rounded focus:ring-sky-500 accent-sky-500 cursor-pointer">
-                        <span>保護已載入模型：切換前需手動 Eject（不自動卸載）</span>
-                    </label>
-                </div>
+                    </div>
 
                 <!-- Template Selector -->
                 <div>
@@ -244,10 +240,6 @@
                     
                     <button onclick="testConnection()" class="w-full flex items-center justify-center bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-lg transition duration-150 text-sm shadow-sm shadow-slate-300">
                         <i class="fa-solid fa-bolt mr-2"></i>[ 測試連線與載入 ]
-                    </button>
-
-                    <button id="eject-model-btn" onclick="ejectLoadedModel()" class="hidden w-full flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold py-2 px-4 rounded-lg border border-amber-200 transition duration-150 text-sm" title="手動卸載目前載入的模型">
-                        <i class="fa-solid fa-eject mr-2"></i>[ Eject 卸載目前模型 ]
                     </button>
                     
                     <div class="grid grid-cols-2 gap-2">
@@ -483,7 +475,7 @@
         const DEFAULT_CONFIG = {
             api_base_url: "https://unpurged-tamed-lois.ngrok-free.dev/v1",
             api_key: "lm-studio",
-            system_prompt: "你是一位OCR Markdown文件分析助理，使用繁體中文回答並提供關鍵數據分析與主要結論。",
+            system_prompt: "你是一個專業的助理，請使用繁體中文回答。你可以閱讀我提供的完整文件內容並進行深度分析。",
             timeout: 600.0
         };
 
@@ -498,7 +490,7 @@
         let isGenerating = false;
         let abortController = null;
         let modelContextMap = {}; // 記錄每個 model 的上下文長度
-        let loadedModelId = null; // 目前 LM Studio 中已載入的模型
+        let loadedModelIds = []; // 記錄 LM Studio 中所有已載入的模型 id
 
         // --- 初始化讀取 ---
         window.addEventListener('DOMContentLoaded', () => {
@@ -518,7 +510,6 @@
                     currentConfig.api_key = parsed.api_key || DEFAULT_CONFIG.api_key;
                     currentConfig.system_prompt = parsed.system_prompt || DEFAULT_CONFIG.system_prompt;
                     currentConfig.timeout = parsed.timeout || DEFAULT_CONFIG.timeout;
-                    currentConfig.protect_loaded_model = parsed.protect_loaded_model ?? false;
                 } catch (e) {
                     currentConfig = { ...DEFAULT_CONFIG };
                 }
@@ -529,14 +520,12 @@
             document.getElementById('api-base-url').value = currentConfig.api_base_url;
             document.getElementById('api-key').value = currentConfig.api_key;
             document.getElementById('system-prompt').value = currentConfig.system_prompt;
-            document.getElementById('protect-loaded-model').checked = currentConfig.protect_loaded_model;
         }
 
         function saveConfig() {
             currentConfig.api_base_url = document.getElementById('api-base-url').value.trim();
             currentConfig.api_key = document.getElementById('api-key').value.trim();
             currentConfig.system_prompt = document.getElementById('system-prompt').value;
-            currentConfig.protect_loaded_model = document.getElementById('protect-loaded-model').checked;
             
             localStorage.setItem('light_tech_ai_config', JSON.stringify(currentConfig));
             showToast("存檔成功", "所有設定參數已寫入本地核心記憶體。");
@@ -690,7 +679,7 @@
                 if (modelList.length > 0) {
                     // 嘗試從 LM Studio 專屬 REST API 取得各模型的上下文長度與載入狀態
                     modelContextMap = {};
-                    loadedModelId = null;
+                    loadedModelIds = [];
                     try {
                         const rootUrl = finalUrl.replace(/\/v1$/, "");
                         const restController = new AbortController();
@@ -721,9 +710,11 @@
                                     if (effectiveCtx) {
                                         modelContextMap[m.id] = effectiveCtx;
                                     }
-                                    // 判斷目前哪個模型已被載入
+                                    // 收集所有已載入的模型（支援多模型同時載入）
                                     if (m.state === "loaded" || (m.loaded_instances && m.loaded_instances.length > 0)) {
-                                        loadedModelId = m.id;
+                                        if (!loadedModelIds.includes(m.id)) {
+                                            loadedModelIds.push(m.id);
+                                        }
                                     }
                                 }
                             });
@@ -738,22 +729,25 @@
                         const opt = document.createElement('option');
                         opt.value = modelId;
                         const ctx = modelContextMap[modelId];
-                        const isLoaded = (modelId === loadedModelId);
+                        const isLoaded = loadedModelIds.includes(modelId);
                         let label = modelId;
                         if (ctx) label += ` (ctx: ${ctx.toLocaleString()})`;
                         if (isLoaded) label += ' [已載入]';
                         opt.textContent = label;
                         selector.appendChild(opt);
+                        // 若該模型已載入，預設選取之
+                        if (isLoaded && !selector.value) {
+                            selector.value = modelId;
+                        }
                     });
 
                     const contextSummary = Object.keys(modelContextMap).length > 0
                         ? `偵測到 ${Object.keys(modelContextMap).length} 個模型上下文長度`
                         : "未取得上下文資訊";
-                    const loadedSummary = loadedModelId
-                        ? `目前已載入: ${loadedModelId}`
+                    const loadedSummary = loadedModelIds.length > 0
+                        ? `目前已載入 ${loadedModelIds.length} 個模型: ${loadedModelIds.join(", ")}`
                         : "目前無已載入模型";
                     appendChatText(`[SYSTEM] 連線成功！解析出 ${modelList.length} 個可用模組實例（${contextSummary}；${loadedSummary}）。\n`, "system");
-                    updateEjectButton();
                     if (!isSilent) {
                         showToast("連線成功", `取得可用模型：${modelList.join(", ")}\n${contextSummary}`);
                     }
@@ -1264,85 +1258,6 @@
             return 131072; // 預設值，若無法取得則使用 128K
         }
 
-        // 顯示/隱藏手動 Eject 按鈕
-        function updateEjectButton() {
-            const btn = document.getElementById('eject-model-btn');
-            if (!btn) return;
-            if (loadedModelId) {
-                btn.classList.remove('hidden');
-            } else {
-                btn.classList.add('hidden');
-            }
-        }
-
-        // 手動卸載目前載入的模型
-        async function ejectLoadedModel() {
-            if (!loadedModelId) {
-                showToast("無載入模型", "目前沒有已載入的模型可供卸載。");
-                return;
-            }
-            const baseUrl = document.getElementById('api-base-url').value.trim().replace(/\/+$/, "");
-            const apiKey = document.getElementById('api-key').value.trim();
-            const finalUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
-            const rootUrl = finalUrl.replace(/\/v1$/, "");
-
-            appendChatText(`\n[SYSTEM] 正在卸載模型: ${loadedModelId}...\n`, "system");
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
-                const response = await fetch(`${rootUrl}/api/v1/models/unload`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ instance_id: loadedModelId }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const unloadedId = loadedModelId;
-                    loadedModelId = null;
-                    appendChatText(`[SYSTEM] 模型 ${unloadedId} 已成功卸載（Ejected）。\n`, "system");
-                    showToast("卸載成功", `模型 ${unloadedId} 已從記憶體中釋放。`);
-                    // 更新下拉選單標記
-                    const selector = document.getElementById('model-selector');
-                    Array.from(selector.options).forEach(opt => {
-                        opt.textContent = opt.textContent.replace(/\s*\[已載入\]$/, '');
-                    });
-                    updateEjectButton();
-                    updateTokenDisplay();
-                } else {
-                    let errMsg = `卸載失敗，狀態碼: ${response.status}`;
-                    try {
-                        const errBody = await response.json();
-                        if (errBody?.error?.message) errMsg += ` - ${errBody.error.message}`;
-                    } catch (_) {}
-                    throw new Error(errMsg);
-                }
-            } catch (err) {
-                if (err.name === 'AbortError') {
-                    appendChatText("[SYSTEM] 卸載請求逾時。\n", "system");
-                } else {
-                    appendChatText(`[ERROR] ${err.message}\n`, "system");
-                }
-            }
-        }
-
-        // 切換模型前的卸載提醒
-        function warnModelSwitch(modelId) {
-            if (!loadedModelId || !modelId) return;
-            if (modelId === loadedModelId) return;
-            const loadedCtx = modelContextMap[loadedModelId];
-            const newCtx = modelContextMap[modelId];
-            appendChatText(`\n[⚠️ 模型切換提醒]\n`, "system");
-            appendChatText(`  目前載入: ${loadedModelId}${loadedCtx ? ` (ctx: ${loadedCtx.toLocaleString()})` : ""}\n`, "system");
-            appendChatText(`  即將載入: ${modelId}${newCtx ? ` (ctx: ${newCtx.toLocaleString()})` : ""}\n`, "system");
-            appendChatText(`  ⚠️ 載入新模型時，LM Studio 會先卸載（Eject）目前的模型 ${loadedModelId}，若正在進行分析請務必先停止！\n`, "system");
-            appendChatText(`  首次載入新模型需等待模型檔案載入時間，prefill 亦可能因此更慢。\n`, "system");
-        }
-
         function updateTokenDisplay() {
             const tokenEl = document.getElementById('token-count-display');
             if (!tokenEl) return;
@@ -1492,15 +1407,6 @@
             const selectedModel = document.getElementById('model-selector').value;
             if (!selectedModel) {
                 appendChatText("\n[ERROR] 偵測不到系統運算模型，請先點選測試連線確認端點狀態。\n", "system");
-                return;
-            }
-
-            warnModelSwitch(selectedModel);
-
-            if (document.getElementById('protect-loaded-model').checked && loadedModelId && selectedModel !== loadedModelId) {
-                appendChatText(`\n[🔒 保護模式已啟用] 目前載入的模型 ${loadedModelId} 不會被自動卸載。\n`, "system");
-                appendChatText(`  若要以模型 ${selectedModel} 進行分析，請先點擊側欄「[ Eject 卸載目前模型 ]」，再重新送出。\n`, "system");
-                appendChatText(`  （若想自動切換，請取消勾選「保護已載入模型」選項。）\n`, "system");
                 return;
             }
 
@@ -1711,10 +1617,7 @@
 
         document.getElementById('user-input').addEventListener('input', updateTokenDisplay);
         document.getElementById('system-prompt').addEventListener('input', updateTokenDisplay);
-        document.getElementById('model-selector').addEventListener('change', () => {
-            warnModelSwitch(document.getElementById('model-selector').value);
-            updateTokenDisplay();
-        });
+        document.getElementById('model-selector').addEventListener('change', updateTokenDisplay);
     </script>
 </body>
 </html>
